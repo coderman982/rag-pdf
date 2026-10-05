@@ -9,10 +9,13 @@ services:
     ports:
       - "6333:6333"
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e 'GET /readyz HTTP/1.1\\nHost: localhost\\nConnection: close\\n\\n' >&3 && cat <&3 | grep -q 'healthz check passed'"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      # The qdrant image ships no curl/wget. Invoke bash explicitly: CMD-SHELL
+      # runs /bin/sh (dash), which has no /dev/tcp support.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   # FastAPI app exposing the Inngest functions at /api/inngest
   api:
@@ -36,16 +39,14 @@ services:
     ports:
       - "8000:8000"
 
-  # Replaces the local dev server. Use `dev` instead while developing locally.
+  # Self-hosted Inngest engine.
+  # NOTE: the inngest CLI (v1.45) has no `serve` subcommand - it has `dev` and
+  # `start`. `start` requires external persistence (Postgres) via --config.
+  # `dev` runs standalone, which is what this stack uses.
   inngest:
     image: inngest/inngest:latest
     restart: unless-stopped
-    command: serve -u http://api:8000/api/inngest
-    environment:
-      INNGEST_DEV: "true"
-      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
-      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
-      INNGEST_ALLOW_INSECURE_SIGNING_KEY: "true"
+    command: ["inngest", "dev", "-u", "http://api:8000/api/inngest", "--host", "0.0.0.0"]
     depends_on:
       - api
     ports:
